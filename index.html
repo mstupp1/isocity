@@ -32,6 +32,8 @@
     <div id="startMenu"> <div class="menu-content"> <h1>IsoCity</h1> <p>Hover: Pulsing Highlight | Hover Buildings: See-Through | Click/Drag: Place/Remove</p> <button id="startButton"> Start Game </button> </div> </div>
     <div class="game-container"> <canvas id="gameCanvas"></canvas> </div>
     <div id="messageBox" class="message-box"> <h2 id="messageTitle">Quit Game?</h2> <p id="messageText">Are you sure?</p> <button id="confirmButton">Yes, Quit</button> <button id="cancelButton">Cancel</button> </div>
+    <audio id="backgroundMusic1" preload="auto" src="assets/IsoCity.mp3"></audio>
+    <audio id="backgroundMusic2" preload="auto" src="assets/IsoCity.mp3"></audio>
 
     <script>
         // --- Game Configuration ---
@@ -45,6 +47,10 @@
         const HAZE_COLOR = 'rgba(230, 235, 240, 0.08)';
         const TOOLBAR_HEIGHT = 50; const TOOLBAR_COLOR = 'rgba(173, 193, 163, 0.65)'; const TOOLBAR_TEXT_COLOR = '#1f2937'; const TOOLBAR_FONT = "300 16px 'Josefin Sans', sans-serif"; const TOOLBAR_TITLE_FONT = "400 18px 'Josefin Sans', sans-serif"; const BUTTON_COLOR = 'rgba(255, 255, 255, 0.3)'; const BUTTON_HOVER_COLOR = 'rgba(255, 255, 255, 0.5)'; const BUTTON_PADDING = 8;
         const BUILDING_ANIM_SPEED = 0.08; const BUILDING_ANIM_OFFSET_Y = 12;
+        // Audio Configuration
+        const MUSIC_FADE_IN_DURATION = 3000; // Fade in duration in milliseconds
+        const MUSIC_VOLUME = 0.7; // Maximum volume (0.0 to 1.0)
+        const CROSSFADE_DURATION = 500; // Crossfade duration in milliseconds (reduced for tighter loop)
         // Cloud Config
         const CLOUD_COUNT = 12;
         const CLOUD_COLOR = 'rgba(255, 255, 255, 0.2)';
@@ -59,6 +65,8 @@
 
         // --- DOM Elements ---
         const canvas = document.getElementById('gameCanvas'); const ctx = canvas.getContext('2d'); const startMenu = document.getElementById('startMenu'); const startButton = document.getElementById('startButton'); const messageBox = document.getElementById('messageBox'); const messageTitle = document.getElementById('messageTitle'); const messageText = document.getElementById('messageText'); let confirmButton = document.getElementById('confirmButton'); let cancelButton = document.getElementById('cancelButton');
+        let backgroundMusic1 = document.getElementById('backgroundMusic1');
+        let backgroundMusic2 = document.getElementById('backgroundMusic2');
 
         // --- Game State ---
         let spriteSheet = null; let grid = []; let isGameRunning = false; let canvasOriginX = 0; let canvasOriginY = 50; let isDraggingLeft = false; let isDraggingRight = false; let lastDraggedTile = { row: -1, col: -1 }; let hoveredTile = { row: -1, col: -1 }; let animationFrameId = null; let pulseTime = 0;
@@ -144,15 +152,208 @@
         function updateHover(screenX, screenY) { /* ... (no changes) ... */ isHoveringQuit = isPointInRect(screenX, screenY, toolbarElements.quit); if (screenY <= TOOLBAR_HEIGHT + 5) { if (hoveredTile.row !== -1 || hoveredTile.col !== -1) { hoveredTile = { row: -1, col: -1 }; updateTargetAlphas(); } return; } if (!isGameRunning || isDraggingLeft || isDraggingRight) return; const { row, col } = screenToIso(screenX, screenY); let hoverChanged = false; const oldR = hoveredTile.row; const oldC = hoveredTile.col; if (row >= 0 && row < GRID_ROWS && col >= 0 && col < GRID_COLS) { if (hoveredTile.row !== row || hoveredTile.col !== col) { hoveredTile = { row, col }; hoverChanged = true; } } else { if (hoveredTile.row !== -1 || hoveredTile.col !== -1) { hoveredTile = { row: -1, col: -1 }; hoverChanged = true; } } if (hoverChanged) { updateTargetAlphas(); } }
         function showMessage(title, text, onConfirm) { /* ... (no changes) ... */ if (!messageBox || !messageTitle || !messageText || !confirmButton || !cancelButton) { console.error("Message box elements missing"); alert(`${title}\n${text}`); if (onConfirm) onConfirm(); return; } messageTitle.textContent = title; messageText.textContent = text; messageBox.style.display = 'block'; const nC = confirmButton.cloneNode(true); confirmButton.replaceWith(nC); confirmButton = nC; const nX = cancelButton.cloneNode(true); cancelButton.replaceWith(nX); cancelButton = nX; confirmButton.onclick = () => { messageBox.style.display = 'none'; if (onConfirm) onConfirm(); }; cancelButton.onclick = () => { messageBox.style.display = 'none'; }; }
 
+        // Audio state tracking
+        let audioState = {
+            isPlaying: false,
+            currentTrack: 1, // 1 or 2
+            audioDuration: 0,
+            crossfadePoint: 0,
+            fadeInInterval: null,
+            crossfadeInterval: null
+        };
+
+        // Play background music with fade-in effect and perfect crossfade looping
+        function playBackgroundMusic() {
+            if (!backgroundMusic1 || !backgroundMusic2) {
+                console.error("Background music elements not found");
+                return;
+            }
+
+            if (audioState.isPlaying) return;
+            audioState.isPlaying = true;
+
+            // Set initial volumes
+            backgroundMusic1.volume = 0;
+            backgroundMusic2.volume = 0;
+
+            // Function to handle the crossfade setup once audio is loaded
+            const setupCrossfadeLoop = () => {
+                // Get audio duration (both tracks are the same)
+                audioState.audioDuration = backgroundMusic1.duration;
+
+                // Set crossfade point to start crossfade very close to the end
+                // We'll start the crossfade when there's just enough time left for the crossfade
+                // Add a small buffer (0.05s) to ensure we don't miss the crossfade point
+                audioState.crossfadePoint = audioState.audioDuration - (CROSSFADE_DURATION / 1000) - 0.05;
+
+                console.log(`Audio duration: ${audioState.audioDuration}s, Crossfade point: ${audioState.crossfadePoint}s`);
+
+                // Start the first track
+                backgroundMusic1.play().catch(error => {
+                    console.error("Error playing background music:", error);
+                });
+
+                // Start fade-in for the first track
+                startFadeIn(backgroundMusic1);
+
+                // Set up the timeupdate listener for crossfade
+                backgroundMusic1.addEventListener('timeupdate', checkForCrossfade);
+                backgroundMusic2.addEventListener('timeupdate', checkForCrossfade);
+            };
+
+            // Function to check if we need to start crossfade
+            const checkForCrossfade = () => {
+                const currentAudio = audioState.currentTrack === 1 ? backgroundMusic1 : backgroundMusic2;
+
+                // If we've reached the crossfade point
+                // Use a small threshold to ensure we don't miss the crossfade point
+                // This helps with timing precision issues
+                if (currentAudio.currentTime >= audioState.crossfadePoint &&
+                    currentAudio.currentTime <= audioState.audioDuration - 0.1 &&
+                    !audioState.crossfadeInterval) {
+                    startCrossfade();
+                }
+            };
+
+            // Function to start the crossfade between tracks
+            const startCrossfade = () => {
+                // Clear any existing crossfade
+                if (audioState.crossfadeInterval) {
+                    clearInterval(audioState.crossfadeInterval);
+                }
+
+                const currentAudio = audioState.currentTrack === 1 ? backgroundMusic1 : backgroundMusic2;
+                const nextAudio = audioState.currentTrack === 1 ? backgroundMusic2 : backgroundMusic1;
+
+                // Prepare the next track
+                nextAudio.currentTime = 0;
+                nextAudio.volume = 0;
+
+                // Start playing the next track
+                nextAudio.play().catch(error => {
+                    console.error("Error playing next track:", error);
+                });
+
+                // Calculate volume change per step
+                // Use 20ms intervals for smoother crossfade
+                const steps = CROSSFADE_DURATION / 20; // 20ms intervals
+                const volumeStep = MUSIC_VOLUME / steps;
+
+                // Start the crossfade
+                let step = 0;
+                audioState.crossfadeInterval = setInterval(() => {
+                    step++;
+
+                    // Increase volume of next track
+                    nextAudio.volume = Math.min(MUSIC_VOLUME, step * volumeStep);
+
+                    // Decrease volume of current track
+                    currentAudio.volume = Math.max(0, MUSIC_VOLUME - (step * volumeStep));
+
+                    // If crossfade is complete
+                    if (step >= steps) {
+                        clearInterval(audioState.crossfadeInterval);
+                        audioState.crossfadeInterval = null;
+
+                        // Stop the previous track
+                        currentAudio.pause();
+
+                        // Switch the current track
+                        audioState.currentTrack = audioState.currentTrack === 1 ? 2 : 1;
+
+                        console.log(`Crossfade complete. Now playing track ${audioState.currentTrack}`);
+                    }
+                }, 20);
+            };
+
+            // Function to handle initial fade-in
+            const startFadeIn = (audioElement) => {
+                // Clear any existing fade-in
+                if (audioState.fadeInInterval) {
+                    clearInterval(audioState.fadeInInterval);
+                }
+
+                // Calculate volume change per step
+                const fadeInStep = MUSIC_VOLUME / (MUSIC_FADE_IN_DURATION / 20); // 20ms intervals for smoother fade-in
+                let currentVolume = 0;
+
+                // Start the fade-in
+                audioState.fadeInInterval = setInterval(() => {
+                    currentVolume += fadeInStep;
+                    if (currentVolume >= MUSIC_VOLUME) {
+                        currentVolume = MUSIC_VOLUME;
+                        clearInterval(audioState.fadeInInterval);
+                        audioState.fadeInInterval = null;
+                        console.log("Music fade-in complete");
+                    }
+                    audioElement.volume = currentVolume;
+                }, 20);
+            };
+
+            // Check if audio is loaded and set up the loop
+            if (backgroundMusic1.readyState >= 2) {
+                setupCrossfadeLoop();
+            } else {
+                // Wait for the audio to load
+                backgroundMusic1.addEventListener('loadedmetadata', setupCrossfadeLoop, { once: true });
+            }
+        }
+
         function startGame() {
             if (isGameRunning) return; isGameRunning = true; startMenu.style.display = 'none';
             initializeGrid();
             resizeCanvas(); // Resize first to get canvas dimensions
             initializeClouds(CLOUD_COUNT); // Then initialize clouds based on dimensions
+
+            // Play background music with fade-in
+            playBackgroundMusic();
+
             if (spriteSheet?.complete) { if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(gameLoop); console.log("Game started."); }
             else { console.log("Waiting for sprite..."); }
         }
-        function quitGame() { /* ... (no changes) ... */ if (!isGameRunning) return; showMessage("Quit Game?", "Are you sure?", () => { isGameRunning = false; if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; console.log("Loop stopped."); } isDraggingLeft = false; isDraggingRight = false; hoveredTile = { row: -1, col: -1 }; startMenu.style.display = 'flex'; if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height); }); }
+        function quitGame() { /* ... (no changes) ... */ if (!isGameRunning) return; showMessage("Quit Game?", "Are you sure?", () => { isGameRunning = false; if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; console.log("Loop stopped."); } isDraggingLeft = false; isDraggingRight = false; hoveredTile = { row: -1, col: -1 }; startMenu.style.display = 'flex'; if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Stop the music and clean up
+            if (backgroundMusic1 && backgroundMusic2) {
+                // Stop both audio tracks
+                backgroundMusic1.pause();
+                backgroundMusic2.pause();
+
+                // Reset positions and volumes
+                backgroundMusic1.currentTime = 0;
+                backgroundMusic2.currentTime = 0;
+                backgroundMusic1.volume = 0;
+                backgroundMusic2.volume = 0;
+
+                // Create clones to remove all event listeners
+                const oldAudio1 = backgroundMusic1;
+                const oldAudio2 = backgroundMusic2;
+                const newAudio1 = oldAudio1.cloneNode(true);
+                const newAudio2 = oldAudio2.cloneNode(true);
+
+                // Replace the elements
+                oldAudio1.parentNode.replaceChild(newAudio1, oldAudio1);
+                oldAudio2.parentNode.replaceChild(newAudio2, oldAudio2);
+
+                // Update references
+                backgroundMusic1 = newAudio1;
+                backgroundMusic2 = newAudio2;
+
+                // Clear any active intervals
+                if (audioState.fadeInInterval) {
+                    clearInterval(audioState.fadeInInterval);
+                    audioState.fadeInInterval = null;
+                }
+
+                if (audioState.crossfadeInterval) {
+                    clearInterval(audioState.crossfadeInterval);
+                    audioState.crossfadeInterval = null;
+                }
+
+                // Reset audio state
+                audioState.isPlaying = false;
+                audioState.currentTrack = 1;
+            }
+        }); }
 
         // --- Event Listeners ---
         startButton.addEventListener('click', startGame); window.addEventListener('resize', resizeCanvas);
