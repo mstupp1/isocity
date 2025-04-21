@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IsoCity</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; overflow: hidden; background-color: #f0f4f8; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
+        #gameCanvas { display: block; background-image: linear-gradient(to bottom right, #c1e8e1, #dcedc1); cursor: pointer; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; }
+        .game-container { flex-grow: 1; display: flex; justify-content: center; align-items: center; padding: 20px; }
+        #startMenu { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); display: flex; justify-content: center; align-items: center; z-index: 100; text-align: center; }
+        #startMenu .menu-content { background-color: rgba(173, 193, 163, 0.85); color: #1f2937; font-family: 'Josefin Sans', sans-serif; padding: 2rem 3rem; border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.2); border: 1px solid rgba(255, 255, 255, 0.2); }
+        #startMenu h1 { font-weight: 400; font-size: 2.25rem; margin-bottom: 1rem; }
+        #startMenu p { font-weight: 300; margin-bottom: 1.5rem; font-size: 1.1rem; }
+        #startMenu button#startButton { background-color: rgba(255, 255, 255, 0.3); color: #1f2937; font-family: 'Josefin Sans', sans-serif; font-weight: 400; padding: 0.75rem 1.5rem; border-radius: 6px; border: none; transition: background-color 0.3s ease; font-size: 1rem; }
+        #startMenu button#startButton:hover { background-color: rgba(255, 255, 255, 0.5); }
+        .message-box { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: rgba(173, 193, 163, 0.9); color: #1f2937; font-family: 'Josefin Sans', sans-serif; padding: 25px 45px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); z-index: 110; display: none; text-align: center; border: 1px solid rgba(255, 255, 255, 0.15); }
+        .message-box h2 { margin-top: 0; font-weight: 400; font-size: 1.5rem; margin-bottom: 10px; }
+        .message-box p { font-weight: 300; font-size: 1rem; margin-bottom: 20px; }
+        .message-box button { font-family: 'Josefin Sans', sans-serif; font-weight: 400; padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; transition: background-color 0.3s ease, box-shadow 0.3s ease; font-size: 0.95rem; margin: 0 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .message-box button#confirmButton { background-color: rgba(220, 53, 69, 0.7); color: white; }
+        .message-box button#confirmButton:hover { background-color: rgba(220, 53, 69, 0.9); box-shadow: 0 3px 6px rgba(0,0,0,0.15); }
+        .message-box button#cancelButton { background-color: rgba(255, 255, 255, 0.3); color: #1f2937; }
+        .message-box button#cancelButton:hover { background-color: rgba(255, 255, 255, 0.5); box-shadow: 0 3px 6px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div id="startMenu"> <div class="menu-content"> <h1>IsoCity</h1> <p>Hover: Pulsing Highlight | Hover Buildings: See-Through | Click/Drag: Place/Remove</p> <button id="startButton"> Start Game </button> </div> </div>
+    <div class="game-container"> <canvas id="gameCanvas"></canvas> </div>
+    <div id="messageBox" class="message-box"> <h2 id="messageTitle">Quit Game?</h2> <p id="messageText">Are you sure?</p> <button id="confirmButton">Yes, Quit</button> <button id="cancelButton">Cancel</button> </div>
+
+    <script>
+        // --- Game Configuration ---
+        const TILE_BASE_WIDTH = 64; const TILE_BASE_HEIGHT = 64; const TILE_ISO_WIDTH = TILE_BASE_WIDTH; const TILE_ISO_HEIGHT = TILE_BASE_WIDTH / 2;
+        const GRID_COLS = 10; const GRID_ROWS = 10;
+        const SPRITE_SHEET_URL = 'https://i.imgur.com/TthFDvD.png'; const SPRITE_COLS = 4; const SPRITE_ROWS = 4; const TOTAL_SPRITES = SPRITE_COLS * SPRITE_ROWS;
+        const HOVER_GLOW_COLOR = 'rgba(255, 255, 0, 0.7)'; const HOVER_GLOW_BLUR = 10;
+        const OBSCURING_FRONT_ALPHA_MIN = 0.3; const OBSCURING_FRONT_MAX_DIST = 3; const OBSCURING_BEHIND_ALPHA_MIN = 0.7; const OBSCURING_BEHIND_MAX_DIST = 2; const ALPHA_ANIMATION_SPEED = 0.15;
+        const TILE_HIGHLIGHT_GLOW_COLOR = '#FFFF00'; const TILE_HIGHLIGHT_LINE_COLOR = '#FFFFFF'; const TILE_HIGHLIGHT_LINE_WIDTH = 1; const TILE_HIGHLIGHT_MAX_BLUR = 8; const TILE_HIGHLIGHT_PULSE_SPEED = 0.05;
+        const TILE_DEFAULT_STROKE_COLOR = '#78887b'; const TILE_DEFAULT_LINE_WIDTH = 1; const TILE_GRADIENT_TOP_COLOR = '#c1d1b9'; const TILE_GRADIENT_BOTTOM_COLOR = '#99b18d';
+        const HAZE_COLOR = 'rgba(230, 235, 240, 0.08)';
+        const TOOLBAR_HEIGHT = 50; const TOOLBAR_COLOR = 'rgba(173, 193, 163, 0.65)'; const TOOLBAR_TEXT_COLOR = '#1f2937'; const TOOLBAR_FONT = "300 16px 'Josefin Sans', sans-serif"; const TOOLBAR_TITLE_FONT = "400 18px 'Josefin Sans', sans-serif"; const BUTTON_COLOR = 'rgba(255, 255, 255, 0.3)'; const BUTTON_HOVER_COLOR = 'rgba(255, 255, 255, 0.5)'; const BUTTON_PADDING = 8;
+        const BUILDING_ANIM_SPEED = 0.08; const BUILDING_ANIM_OFFSET_Y = 12;
+        // Cloud Config
+        const CLOUD_COUNT = 12;
+        const CLOUD_COLOR = 'rgba(255, 255, 255, 0.2)';
+        const CLOUD_MIN_RX = 40; const CLOUD_MAX_RX = 80;
+        const CLOUD_MIN_RY = 15; const CLOUD_MAX_RY = 30;
+        const CLOUD_MIN_SPEED = 0.1; const CLOUD_MAX_SPEED = 0.4;
+        const CLOUD_MIN_OPACITY = 0.1; const CLOUD_MAX_OPACITY = 0.35;
+        // ** NEW ** Cloud Y Position Range (relative to canvas height)
+        const CLOUD_MIN_Y_FACTOR = 0.25; // Start clouds lower (e.g., 25% down)
+        const CLOUD_MAX_Y_FACTOR = 0.65; // Allow clouds lower (e.g., down to 65%)
+
+
+        // --- DOM Elements ---
+        const canvas = document.getElementById('gameCanvas'); const ctx = canvas.getContext('2d'); const startMenu = document.getElementById('startMenu'); const startButton = document.getElementById('startButton'); const messageBox = document.getElementById('messageBox'); const messageTitle = document.getElementById('messageTitle'); const messageText = document.getElementById('messageText'); let confirmButton = document.getElementById('confirmButton'); let cancelButton = document.getElementById('cancelButton');
+
+        // --- Game State ---
+        let spriteSheet = null; let grid = []; let isGameRunning = false; let canvasOriginX = 0; let canvasOriginY = 50; let isDraggingLeft = false; let isDraggingRight = false; let lastDraggedTile = { row: -1, col: -1 }; let hoveredTile = { row: -1, col: -1 }; let animationFrameId = null; let pulseTime = 0;
+        let toolbarElements = { quit: { x: 0, y: 0, width: 0, height: 0 } }; let isHoveringQuit = false;
+        let clouds = [];
+
+        // --- Utility Functions ---
+        function isoToScreen(row, col) { const screenX = canvasOriginX + (col - row) * (TILE_ISO_WIDTH / 2); const screenY = canvasOriginY + (col + row) * (TILE_ISO_HEIGHT / 2); return { x: screenX, y: screenY }; }
+        function screenToIso(screenX, screenY) { const aX = screenX - canvasOriginX; const aY = screenY - canvasOriginY - (TILE_ISO_HEIGHT / 4); const tX = aX / (TILE_ISO_WIDTH / 2); const tY = aY / (TILE_ISO_HEIGHT / 2); const row = Math.round((tY - tX) / 2); const col = Math.round((tX + tY) / 2); return { row, col }; }
+        function getSpriteCoords(spriteIndex) { if (spriteIndex < 0 || spriteIndex >= TOTAL_SPRITES) return null; const sx = (spriteIndex % SPRITE_COLS) * TILE_BASE_WIDTH; const sy = Math.floor(spriteIndex / SPRITE_COLS) * TILE_BASE_HEIGHT; return { sx, sy }; }
+        function calculateAlpha(dist, maxDist, minAlpha) { if (dist <= 0 || maxDist <= 0) return 1.0; const r = Math.max(1, maxDist - 1); let a = minAlpha + (1.0 - minAlpha) * (dist - 1) / r; return Math.max(minAlpha, Math.min(1.0, a)); }
+        function easeOutQuad(t) { return t * (2 - t); }
+        function easeInQuad(t) { return t * t; }
+        function randomRange(min, max) { return Math.random() * (max - min) + min; }
+
+        // --- Drawing Functions ---
+        function drawTile(row, col) { /* ... (no changes) ... */ if (!grid[row]?.[col]) { return; } const tileData = grid[row][col]; const spriteIndex = tileData.spriteIndex; const hoverAlpha = tileData.currentAlpha; const isBuildingAnimating = tileData.isAnimating; const animProgress = tileData.animationProgress; const animType = tileData.animationType; const { x: screenX, y: screenY } = isoToScreen(row, col); const hr = hoveredTile.row; const hc = hoveredTile.col; const isCurrentlyHoveredTile = (row === hr && col === hc); const hoveredTileHasBuilding = (hr !== -1 && hc !== -1 && grid[hr]?.[hc]?.spriteIndex !== -1); const buildingEffectsActive = hoveredTileHasBuilding && !isDraggingLeft && !isDraggingRight; const applyBuildingGlow = (isCurrentlyHoveredTile && buildingEffectsActive); const orig = { a: ctx.globalAlpha, ss: ctx.strokeStyle, lw: ctx.lineWidth, sc: ctx.shadowColor, sb: ctx.shadowBlur, co: ctx.globalCompositeOperation, fs: ctx.fillStyle }; const gradient = ctx.createLinearGradient(screenX, screenY - TILE_ISO_HEIGHT / 2, screenX, screenY + TILE_ISO_HEIGHT / 2); gradient.addColorStop(0, TILE_GRADIENT_TOP_COLOR); gradient.addColorStop(1, TILE_GRADIENT_BOTTOM_COLOR); ctx.fillStyle = gradient; ctx.strokeStyle = TILE_DEFAULT_STROKE_COLOR; ctx.lineWidth = TILE_DEFAULT_LINE_WIDTH; ctx.globalAlpha = (spriteIndex !== -1 && buildingEffectsActive) ? hoverAlpha : 1.0; ctx.beginPath(); ctx.moveTo(screenX, screenY + TILE_ISO_HEIGHT / 2); ctx.lineTo(screenX + TILE_ISO_WIDTH / 2, screenY); ctx.lineTo(screenX, screenY - TILE_ISO_HEIGHT / 2); ctx.lineTo(screenX - TILE_ISO_WIDTH / 2, screenY); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.strokeStyle = orig.ss; ctx.lineWidth = orig.lw; ctx.globalAlpha = orig.a; ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.fillStyle = orig.fs; if ((spriteIndex !== -1 || (isBuildingAnimating && animType === 'disappear')) && spriteSheet?.complete) { const indexToDraw = (isBuildingAnimating && animType === 'disappear') ? tileData.disappearingSpriteIndex : spriteIndex; if (indexToDraw === -1) return; const spriteCoords = getSpriteCoords(indexToDraw); if (spriteCoords) { const destX = screenX - TILE_BASE_WIDTH / 2; const baseY = screenY - TILE_BASE_HEIGHT + TILE_ISO_HEIGHT / 2; let offsetY = 0; let buildingAlpha = 1.0; if (isBuildingAnimating) { if (animType === 'appear') { const eP = easeOutQuad(animProgress); offsetY = BUILDING_ANIM_OFFSET_Y * (1 - eP); buildingAlpha = animProgress; } else { const eP = easeInQuad(animProgress); offsetY = BUILDING_ANIM_OFFSET_Y * eP; buildingAlpha = 1.0 - animProgress; } buildingAlpha = Math.max(0, buildingAlpha); } else { buildingAlpha = buildingEffectsActive ? hoverAlpha : 1.0; } const finalDestY = baseY + offsetY; ctx.globalAlpha = buildingAlpha; if (applyBuildingGlow && !(isBuildingAnimating && animType === 'disappear')) { ctx.shadowColor = HOVER_GLOW_COLOR; ctx.shadowBlur = HOVER_GLOW_BLUR; } else { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; } ctx.drawImage(spriteSheet, spriteCoords.sx, spriteCoords.sy, TILE_BASE_WIDTH, TILE_BASE_HEIGHT, destX, finalDestY, TILE_BASE_WIDTH, TILE_BASE_HEIGHT); ctx.shadowColor = orig.sc; ctx.shadowBlur = orig.sb; ctx.globalCompositeOperation = orig.co; ctx.fillStyle = orig.fs; ctx.globalAlpha = orig.a; } } }
+        function drawToolbar() { /* ... (no changes) ... */ const padding = 10; const buttonHeight = TOOLBAR_HEIGHT - 2 * BUTTON_PADDING; const quitText = "Quit"; ctx.font = TOOLBAR_FONT; const quitWidth = ctx.measureText(quitText).width + 2 * BUTTON_PADDING; toolbarElements.quit = { x: canvas.width - quitWidth - padding, y: BUTTON_PADDING, width: quitWidth, height: buttonHeight }; const origFill = ctx.fillStyle; const origStroke = ctx.strokeStyle; const origLineWidth = ctx.lineWidth; ctx.fillStyle = TOOLBAR_COLOR; ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'; ctx.lineWidth = 1; ctx.beginPath(); if (ctx.roundRect) { ctx.roundRect(5, 5, canvas.width - 10, TOOLBAR_HEIGHT, 8); ctx.fill(); ctx.stroke(); } else { ctx.fillRect(5, 5, canvas.width - 10, TOOLBAR_HEIGHT); ctx.strokeRect(5, 5, canvas.width - 10, TOOLBAR_HEIGHT); } ctx.font = TOOLBAR_TITLE_FONT; ctx.fillStyle = TOOLBAR_TEXT_COLOR; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText("IsoCity", padding * 2, TOOLBAR_HEIGHT / 2 + 2); ctx.fillStyle = isHoveringQuit ? BUTTON_HOVER_COLOR : BUTTON_COLOR; ctx.beginPath(); if (ctx.roundRect) { ctx.roundRect(toolbarElements.quit.x, toolbarElements.quit.y, toolbarElements.quit.width, toolbarElements.quit.height, 5); ctx.fill(); } else { ctx.fillRect(toolbarElements.quit.x, toolbarElements.quit.y, toolbarElements.quit.width, toolbarElements.quit.height); } ctx.font = TOOLBAR_FONT; ctx.fillStyle = TOOLBAR_TEXT_COLOR; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(quitText, toolbarElements.quit.x + toolbarElements.quit.width / 2, TOOLBAR_HEIGHT / 2 + 2); ctx.fillStyle = origFill; ctx.strokeStyle = origStroke; ctx.lineWidth = origLineWidth; }
+        function drawClouds() { /* ... (no changes) ... */ const originalFill = ctx.fillStyle; const originalShadowColor = ctx.shadowColor; const originalShadowBlur = ctx.shadowBlur; ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; clouds.forEach(cloud => { ctx.fillStyle = `rgba(255, 255, 255, ${cloud.opacity})`; ctx.beginPath(); ctx.ellipse(cloud.x, cloud.y, cloud.radiusX, cloud.radiusY, 0, 0, Math.PI * 2); ctx.fill(); }); ctx.fillStyle = originalFill; ctx.shadowColor = originalShadowColor; ctx.shadowBlur = originalShadowBlur; }
+        function drawGrid(pulseFactor) { /* ... (no changes) ... */ if (!isGameRunning || !ctx) return; ctx.clearRect(0, 0, canvas.width, canvas.height); for (let r = 0; r < GRID_ROWS; r++) { for (let c = 0; c < GRID_COLS; c++) { if (grid[r]) { drawTile(r, c); } } } drawClouds(); const hr = hoveredTile.row; const hc = hoveredTile.col; if (hr !== -1 && hc !== -1 && !isDraggingLeft && !isDraggingRight) { const { x: sX, y: sY } = isoToScreen(hr, hc); const hasB = grid[hr]?.[hc]?.spriteIndex !== -1; const orig = { ss: ctx.strokeStyle, lw: ctx.lineWidth, sc: ctx.shadowColor, sb: ctx.shadowBlur }; const blur = pulseFactor * TILE_HIGHLIGHT_MAX_BLUR; ctx.shadowColor = TILE_HIGHLIGHT_GLOW_COLOR; ctx.shadowBlur = blur; ctx.strokeStyle = TILE_HIGHLIGHT_LINE_COLOR; ctx.lineWidth = TILE_HIGHLIGHT_LINE_WIDTH; ctx.beginPath(); if (hasB) { ctx.moveTo(sX - TILE_ISO_WIDTH / 2, sY); ctx.lineTo(sX, sY + TILE_ISO_HEIGHT / 2); ctx.lineTo(sX + TILE_ISO_WIDTH / 2, sY); } else { ctx.moveTo(sX, sY + TILE_ISO_HEIGHT / 2); ctx.lineTo(sX + TILE_ISO_WIDTH / 2, sY); ctx.lineTo(sX, sY - TILE_ISO_HEIGHT / 2); ctx.lineTo(sX - TILE_ISO_WIDTH / 2, sY); ctx.closePath(); } ctx.stroke(); ctx.strokeStyle = orig.ss; ctx.lineWidth = orig.lw; ctx.shadowColor = orig.sc; ctx.shadowBlur = orig.sb; } drawToolbar(); const origFill = ctx.fillStyle; ctx.fillStyle = HAZE_COLOR; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = origFill; }
+
+        // --- Game Logic & Animation Loop ---
+        function initializeGrid() { grid = []; for (let r = 0; r < GRID_ROWS; r++) { grid[r] = []; for (let c = 0; c < GRID_COLS; c++) { grid[r][c] = { spriteIndex: -1, currentAlpha: 1.0, targetAlpha: 1.0, isAnimating: false, animationProgress: 0, animationType: null, disappearingSpriteIndex: -1 }; } } hoveredTile = { row: -1, col: -1 }; pulseTime = 0; }
+
+        function initializeClouds(count) {
+            clouds = [];
+            // Ensure canvas has dimensions before initializing clouds based on them
+            if (canvas.width === 0 || canvas.height === 0) {
+                console.warn("Canvas dimensions not set, delaying cloud initialization.");
+                // Optionally, try again after a short delay or on first resize
+                return;
+            }
+            const minY = canvas.height * CLOUD_MIN_Y_FACTOR; // Calculate based on factors
+            const maxY = canvas.height * CLOUD_MAX_Y_FACTOR;
+
+            for (let i = 0; i < count; i++) {
+                clouds.push({
+                    x: randomRange(-canvas.width * 0.2, canvas.width * 1.2),
+                    y: randomRange(minY, maxY), // Use new Y range
+                    radiusX: randomRange(CLOUD_MIN_RX, CLOUD_MAX_RX),
+                    radiusY: randomRange(CLOUD_MIN_RY, CLOUD_MAX_RY),
+                    opacity: randomRange(CLOUD_MIN_OPACITY, CLOUD_MAX_OPACITY),
+                    speedX: randomRange(CLOUD_MIN_SPEED, CLOUD_MAX_SPEED) * (Math.random() < 0.5 ? 1 : -1)
+                });
+            }
+            console.log(`Initialized ${clouds.length} clouds.`);
+        }
+
+        function updateClouds() {
+            // Ensure canvas dimensions are available for wrapping logic
+            if (canvas.width === 0 || canvas.height === 0) return;
+
+            const minY = canvas.height * CLOUD_MIN_Y_FACTOR; // Calculate based on factors
+            const maxY = canvas.height * CLOUD_MAX_Y_FACTOR;
+
+            clouds.forEach(cloud => {
+                cloud.x += cloud.speedX;
+                // Wrap around logic
+                if (cloud.speedX > 0 && cloud.x - cloud.radiusX > canvas.width) {
+                    cloud.x = -cloud.radiusX;
+                    cloud.y = randomRange(minY, maxY); // Use new Y range on wrap
+                } else if (cloud.speedX < 0 && cloud.x + cloud.radiusX < 0) {
+                    cloud.x = canvas.width + cloud.radiusX;
+                     cloud.y = randomRange(minY, maxY); // Use new Y range on wrap
+                }
+            });
+        }
+
+        function updateTargetAlphas() { /* ... (no changes) ... */ if (!isGameRunning) return; const hr = hoveredTile.row; const hc = hoveredTile.col; const hasB = (hr !== -1 && hc !== -1 && grid[hr]?.[hc]?.spriteIndex !== -1); const active = hasB && !isDraggingLeft && !isDraggingRight; for (let r = 0; r < GRID_ROWS; r++) { for (let c = 0; c < GRID_COLS; c++) { if (!grid[r]?.[c]) continue; let target = 1.0; const isH = (r === hr && c === hc); if (active && !isH) { if (r >= hr && c >= hc) { const d = (r - hr) + (c - hc); if (d > 0 && d <= OBSCURING_FRONT_MAX_DIST) target = calculateAlpha(d, OBSCURING_FRONT_MAX_DIST, OBSCURING_FRONT_ALPHA_MIN); } else if (r <= hr && c <= hc) { const d = (hr - r) + (hc - c); if (d > 0 && d <= OBSCURING_BEHIND_MAX_DIST) target = calculateAlpha(d, OBSCURING_BEHIND_MAX_DIST, OBSCURING_BEHIND_ALPHA_MIN); } } grid[r][c].targetAlpha = target; } } }
+
+        function gameLoop() {
+            if (!isGameRunning) { animationFrameId = null; return; }
+            pulseTime += TILE_HIGHLIGHT_PULSE_SPEED; const pulseFactor = (Math.sin(pulseTime) + 1) / 2;
+            for (let r = 0; r < GRID_ROWS; r++) { for (let c = 0; c < GRID_COLS; c++) { if (!grid[r]?.[c]) continue; const tile = grid[r][c]; if (!tile.isAnimating) { if (Math.abs(tile.currentAlpha - tile.targetAlpha) > 0.01) { tile.currentAlpha += (tile.targetAlpha - tile.currentAlpha) * ALPHA_ANIMATION_SPEED; if (Math.abs(tile.currentAlpha - tile.targetAlpha) <= 0.01) tile.currentAlpha = tile.targetAlpha; } else if (tile.currentAlpha !== tile.targetAlpha) { tile.currentAlpha = tile.targetAlpha; } } if (tile.isAnimating) { tile.animationProgress += BUILDING_ANIM_SPEED; if (tile.animationProgress >= 1) { tile.animationProgress = 1; tile.isAnimating = false; if (tile.animationType === 'disappear') { tile.spriteIndex = -1; tile.disappearingSpriteIndex = -1; } tile.animationType = null; } } } }
+            updateClouds(); // Update cloud positions
+            drawGrid(pulseFactor);
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        function resizeCanvas() { /* ... (no changes) ... */ const cont = document.querySelector('.game-container'); if (!cont) return; const aW = cont.clientWidth - 40; const aH = cont.clientHeight - 40; const rW = (GRID_COLS + GRID_ROWS) * TILE_ISO_WIDTH / 2 + TILE_ISO_WIDTH; const rH = TILE_BASE_HEIGHT + (GRID_COLS + GRID_ROWS) * TILE_ISO_HEIGHT / 2 + TILE_ISO_HEIGHT + 20; canvas.width = Math.max(600, aW); canvas.height = Math.max(500, aH); canvasOriginX = canvas.width / 2; const topM = TOOLBAR_HEIGHT + 40; canvasOriginY = topM + (canvas.height - topM) / 2 - rH / 2 + TILE_BASE_HEIGHT; canvasOriginY = Math.max(canvasOriginY, TILE_BASE_HEIGHT + TOOLBAR_HEIGHT + 10); if(isGameRunning) drawGrid( (Math.sin(pulseTime) + 1) / 2 ); }
+        function modifyTile(screenX, screenY, action) { /* ... (no changes) ... */ if (screenY <= TOOLBAR_HEIGHT + 5) return; if (!isGameRunning || !spriteSheet?.complete) return; const { row, col } = screenToIso(screenX, screenY); if (row >= 0 && row < GRID_ROWS && col >= 0 && col < GRID_COLS) { if (!grid[row]?.[col]) return; if (!grid[row][col].isAnimating && (row !== lastDraggedTile.row || col !== lastDraggedTile.col)) { const tile = grid[row][col]; if (action === 'place') { if (tile.spriteIndex === -1) { tile.spriteIndex = Math.floor(Math.random() * TOTAL_SPRITES); tile.isAnimating = true; tile.animationProgress = 0; tile.animationType = 'appear'; tile.currentAlpha = 1.0; tile.targetAlpha = 1.0; } } else if (action === 'remove') { if (tile.spriteIndex !== -1) { tile.isAnimating = true; tile.animationProgress = 0; tile.animationType = 'disappear'; tile.disappearingSpriteIndex = tile.spriteIndex; tile.currentAlpha = 1.0; tile.targetAlpha = 1.0; } } lastDraggedTile = { row, col }; } } else { lastDraggedTile = { row: -1, col: -1 }; } }
+        function isPointInRect(x, y, rect) { /* ... (no changes) ... */ return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height; }
+        function updateHover(screenX, screenY) { /* ... (no changes) ... */ isHoveringQuit = isPointInRect(screenX, screenY, toolbarElements.quit); if (screenY <= TOOLBAR_HEIGHT + 5) { if (hoveredTile.row !== -1 || hoveredTile.col !== -1) { hoveredTile = { row: -1, col: -1 }; updateTargetAlphas(); } return; } if (!isGameRunning || isDraggingLeft || isDraggingRight) return; const { row, col } = screenToIso(screenX, screenY); let hoverChanged = false; const oldR = hoveredTile.row; const oldC = hoveredTile.col; if (row >= 0 && row < GRID_ROWS && col >= 0 && col < GRID_COLS) { if (hoveredTile.row !== row || hoveredTile.col !== col) { hoveredTile = { row, col }; hoverChanged = true; } } else { if (hoveredTile.row !== -1 || hoveredTile.col !== -1) { hoveredTile = { row: -1, col: -1 }; hoverChanged = true; } } if (hoverChanged) { updateTargetAlphas(); } }
+        function showMessage(title, text, onConfirm) { /* ... (no changes) ... */ if (!messageBox || !messageTitle || !messageText || !confirmButton || !cancelButton) { console.error("Message box elements missing"); alert(`${title}\n${text}`); if (onConfirm) onConfirm(); return; } messageTitle.textContent = title; messageText.textContent = text; messageBox.style.display = 'block'; const nC = confirmButton.cloneNode(true); confirmButton.replaceWith(nC); confirmButton = nC; const nX = cancelButton.cloneNode(true); cancelButton.replaceWith(nX); cancelButton = nX; confirmButton.onclick = () => { messageBox.style.display = 'none'; if (onConfirm) onConfirm(); }; cancelButton.onclick = () => { messageBox.style.display = 'none'; }; }
+
+        function startGame() {
+            if (isGameRunning) return; isGameRunning = true; startMenu.style.display = 'none';
+            initializeGrid();
+            resizeCanvas(); // Resize first to get canvas dimensions
+            initializeClouds(CLOUD_COUNT); // Then initialize clouds based on dimensions
+            if (spriteSheet?.complete) { if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(gameLoop); console.log("Game started."); }
+            else { console.log("Waiting for sprite..."); }
+        }
+        function quitGame() { /* ... (no changes) ... */ if (!isGameRunning) return; showMessage("Quit Game?", "Are you sure?", () => { isGameRunning = false; if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; console.log("Loop stopped."); } isDraggingLeft = false; isDraggingRight = false; hoveredTile = { row: -1, col: -1 }; startMenu.style.display = 'flex'; if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height); }); }
+
+        // --- Event Listeners ---
+        startButton.addEventListener('click', startGame); window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('mousedown', (event) => { if (!isGameRunning) return; const r = canvas.getBoundingClientRect(); const x = event.clientX - r.left; const y = event.clientY - r.top; lastDraggedTile = { row: -1, col: -1 }; if (isPointInRect(x, y, toolbarElements.quit)) { quitGame(); return; } if (event.button === 0) { isDraggingLeft = true; isDraggingRight = false; modifyTile(x, y, 'place'); } else if (event.button === 2) { isDraggingRight = true; isDraggingLeft = false; modifyTile(x, y, 'remove'); } if (isDraggingLeft || isDraggingRight) { hoveredTile = { row: -1, col: -1 }; updateTargetAlphas(); } });
+        canvas.addEventListener('mousemove', (event) => { if (!isGameRunning) return; const r = canvas.getBoundingClientRect(); const x = event.clientX - r.left; const y = event.clientY - r.top; updateHover(x, y); if (isDraggingLeft || isDraggingRight) { const action = isDraggingRight ? 'remove' : 'place'; modifyTile(x, y, action); } });
+        const stopDragging = (event) => { if (isDraggingLeft || isDraggingRight) { isDraggingLeft = false; isDraggingRight = false; lastDraggedTile = { row: -1, col: -1 }; if (event && isGameRunning) { const r = canvas.getBoundingClientRect(); const x = event.clientX - r.left; const y = event.clientY - r.top; updateHover(x, y); updateTargetAlphas(); } } };
+        canvas.addEventListener('mouseup', stopDragging); canvas.addEventListener('mouseleave', (event) => { const was = isDraggingLeft || isDraggingRight; stopDragging(event); if (hoveredTile.row !== -1 || hoveredTile.col !== -1) { hoveredTile = { row: -1, col: -1 }; if (isGameRunning) { updateTargetAlphas(); } } isHoveringQuit = false; });
+        canvas.addEventListener('contextmenu', (event) => { event.preventDefault(); });
+
+        // --- Initialization ---
+        spriteSheet = new Image(); spriteSheet.onload = () => { console.log("Sprite sheet loaded."); if (isGameRunning && !animationFrameId) { animationFrameId = requestAnimationFrame(gameLoop); console.log("Sprite loaded, starting loop."); } }; spriteSheet.onerror = () => { console.error("Failed to load sprite sheet:", SPRITE_SHEET_URL); showMessage("Error", "Could not load assets.", () => window.location.reload()); }; spriteSheet.src = SPRITE_SHEET_URL;
+        console.log("Game initialized. Waiting for start.");
+
+    </script>
+
+</body>
+</html>
